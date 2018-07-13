@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ deploy_name }}
+  namespace: {{ ns_name }}
+spec:
+  replicas: {{ replicas }}
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app: {{ po_lable }}
+  template:
+    metadata:
+      labels:
+        app: {{ po_lable }}
+    spec:
+      containers:
+      - name: {{ po_name }}
+        image: {{ project_image }}
+        imagePullPolicy: Always
+        livenessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - "{{ exec_command }}"
+          initialDelaySeconds: {{ initial_delay }}
+          timeoutSeconds: {{ healthz_timeout }}
+        readinessProbe:
+          httpGet:
+            path: {{ healthz_path }}
+            port: {{ port_expose }}
+          initialDelaySeconds: {{ initial_delay }}
+          timeoutSeconds: {{ healthz_timeout }}
+        resources:
+          limits:
+            cpu: {{ cpu_limit }}
+            memory: {{ mem_limit }}
+          requests:
+            cpu: {{ cpu_limit }}
+            memory: {{ mem_limit }}
+        ports:
+        - containerPort: {{ port_expose }}
+          name: service
+        {% if debug == "True" %}
+        - containerPort: {{ debug_expose }}
+          name: debug
+        {% endif %}
+        args: {{ args }}

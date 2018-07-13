@@ -1,0 +1,70 @@
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: orange-ingress
+  namespace: orange
+spec:
+  rules:
+  - host: ${SERVICE_URL}
+    http:
+      paths:
+      - backend:
+          serviceName: orange-service
+          servicePort: 80
+  - host: ${MANAGEMENT_URL}
+    http:
+      paths:
+      - backend:
+          serviceName: orange-management-service
+          servicePort: 80
+#  - host: ${API_URL}
+#    http:
+#      paths:
+#      - backend:
+#          serviceName: orange-api-service
+#          servicePort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orange-service
+  namespace: orange
+  labels:
+    app: orange
+spec:
+  ports:
+    - name: orange
+      port: 80
+      targetPort: 8888
+  selector:     
+    app: orange
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orange-management-service
+  namespace: orange
+  labels:
+    app: orange
+spec:
+  ports:
+    - name: orange-management
+      port: 80
+      targetPort: 9999
+  selector:     
+    app: orange
+---
+#apiVersion: v1
+#kind: Service
+#metadata:
+#  name: orange-api-service
+#  namespace: orange
+#  labels:
+#    app: orange
+#spec:
+#  ports:
+#    - name: orange-api
+#      port: 80
+#      targetPort: 7777
+#  selector:     
+#    app: orange

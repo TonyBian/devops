@@ -1,0 +1,84 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: orange
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orange
+  namespace: orange
+  labels:
+    app: orange
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: orange
+  template:
+    metadata:
+      labels:
+        app: orange
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: "app"
+                    operator: In
+                    values:
+                    - orange
+              topologyKey: "kubernetes.io/hostname"
+      containers:
+      - name: orange
+        image: harbor.corp.lc.com/base/orange:v0.6.4
+        imagePullPolicy: Always
+        livenessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - "[[ $(curl -X GET 127.0.0.1:7777/plugins -w %{http_code} -o /dev/null -s) -eq 200 ]]"
+          initialDelaySeconds: 5
+          timeoutSeconds: 1
+        readinessProbe:
+          httpGet:
+            path: /robots.txt
+            port: 8888
+            httpHeaders:
+            - name: Server
+              value: openresty/1.11.2.4
+          initialDelaySeconds: 5
+          timeoutSeconds: 1
+        resources:
+          limits:
+            cpu: 1000m
+            memory: 1024Mi
+          requests:
+            cpu: 100m
+            memory: 1024Mi
+        env:
+          - name: ORANGE_DATABASE
+            value: "${ORANGE_DATABASE}"
+          - name: ORANGE_HOST
+            value: "${ORANGE_IP}"
+          - name: ORANGE_PORT
+            value: "${ORANGE_PORT}"
+          - name: ORANGE_USER
+            value: "${ORANGE_USER}"
+          - name: ORANGE_PWD
+            valueFrom:
+              secretKeyRef:
+                name: orange-secret
+                key: orangeDBPass
+        ports:
+#        - containerPort: 7777
+#          name: api
+#          protocol: TCP
+        - containerPort: 9999
+          name: management
+          protocol: TCP
+        - containerPort: 8888
+          name: service
+          protocol: TCP

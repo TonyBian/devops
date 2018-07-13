@@ -1,0 +1,20 @@
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: {{ svc_name }}-ingress
+  namespace: {{ ns_name }}
+spec:
+  rules:
+  - host: {{ svc_name }}.{{ host_name }}
+    http:
+      paths:
+      - path: {{ ingress_path }}
+        backend:
+          serviceName: {{ svc_name }}
+          servicePort: 80
+  - host: {{ svc_name }}.debug.{{ host_name }}
+    http:
+      paths:
+      - backend:
+          serviceName: {{ svc_name }}
+          servicePort: 8000

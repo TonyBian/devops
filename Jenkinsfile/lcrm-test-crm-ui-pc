@@ -1,0 +1,215 @@
+// pipeline 2.0
+pipeline {
+    agent {
+        label 'jnlp-k8s-test-label'
+    }
+    options {
+        timestamps()
+        timeout(time:1, unit: 'HOURS')
+        disableConcurrentBuilds()
+        buildDiscarder logRotator(artifactDaysToKeepStr: '', artifactNumToKeepStr: '', daysToKeepStr: '', numToKeepStr: '10')
+    }
+
+    //parameters {
+        //choice(name: 'ENV_NAME', choices: "DEV\nUAT", description: '请选择要发布的环境')
+        //string(name: 'BRANCH_NAME', defaultValue: '', description: '请输入要发布的分支名称', trim: true)
+        //string(name: 'TAG_NAME', defaultValue: '', description: '请输入TAG名称, dev环境可留空', trim: true)
+        
+    //}
+
+    environment {
+        //ENV_NAME = "${params.ENV_NAME}"
+        //BRANCH_NAME = "${params.BRANCH_NAME}"
+        //TAG_NAME = "${params.TAG_NAME}"
+        
+        //环境标识, 用于harbor仓库名称, 取值范围{test|prod}
+        ENV_TYPE="test"
+        ENV_NAME="uat"
+        
+        //项目信息
+        GROUP_NAME="lcrm"
+        GITLAB_GROUP_NAME="${GROUP_NAME}-group"
+        DEFAULT_PATH="pc"
+        PROJECT_NAME="ui-${DEFAULT_PATH}"
+        PROJECT_PATH="crm"
+        PROJECT="${PROJECT_PATH}-${PROJECT_NAME}"
+        PROJECT_TYPE="static"
+        SVC_NAME="${PROJECT}-service"
+
+        //编译命令执行目录, 项目根目录下的子目录名称
+        SRC_PATH="/"
+        
+        //PKG名称
+        PKG_PATH="./ui/${DEFAULT_PATH}"
+
+        //gitlab地址
+        //GITLAB_HOST="git@10.1.10.172:"
+        GITLAB_HOST="ssh://git@gitlab.corp.lc.com:10022/"
+        
+        //项目地址
+        PROJECT_GITLAB_URL="${GITLAB_HOST}${GITLAB_GROUP_NAME}/${PROJECT_PATH}.git"
+
+        //对外暴露域名
+        //HOST_NAME="test.traefik.frontend.io"
+        HOST_NAME="test.k8s.io"
+
+        //harbor仓库地址及认证
+        HARBOR_HOST="harbor.corp.lc.com"
+        HARBOR_CREDENTIALSID="harbor-admin-login"
+        
+        //所需docker镜像
+        PROD_IMAGE="${HARBOR_HOST}/base/nginx:v1.15.0"
+        CURL_IMAGE="${HARBOR_HOST}/library/curl:latest"
+        KUBECTL_IMAGE="${HARBOR_HOST}/library/kubectl:v1.10.4"
+        
+        //docker build是否不使用缓存, 取值范围{true|false}
+        DOCKER_BUILE_NO_CACHE="false"
+        
+        //k8s apiserver地址及认证
+        KUBE_APISERVER="https://10.1.10.253:8443"
+        CA_DIR="/etc/kubernetes/ssl"
+        CLIENT_CERT="${CA_DIR}/admin.pem"
+        CLIENT_KEY="${CA_DIR}/admin-key.pem"
+        CA_CERT="${CA_DIR}/ca.pem"
+        //API_USER="readonly"
+        //API_PWD="readonly"
+        
+        //CI/CD项目名称
+        DEVOPS_PROJECT="${GITLAB_HOST}DevSecOps-group/devops.git"
+
+        //Docker容器端口
+        PORT_EXPOSE="80"
+        DEBUG_EXPOSE="8000"
+        
+        //deploy配置
+        DEBUG="False"
+        REPLICAS="2"
+        INITIAL_DELAY="15"
+        HEALTHZ_TIMEOUT="1"
+        CPU_LIMIT="200m"
+        MEM_LIMIT="2048Mi"
+        JAVA_OPTS=""
+        ARGS='["sh", "-c", "nginx -g daemon off;"]'
+
+        //其他参数
+        DOMAIN="lancare.com"
+    }
+ 
+    stages {
+        stage('指定站点目录') {
+            steps {
+                script {
+                    env.INGRESS_PATH = input message: '请输入静态站点目录名称', ok: '确定', parameters: [string(defaultValue: "${DEFAULT_PATH}", description: "默认为${DEFAULT_PATH}", name: 'INGRESS_PATH', trim: true)]
+                    env.HEALTHZ_PATH="${INGRESS_PATH}"
+                    env.EXEC_COMMAND="curl -X GET 127.0.0.1:${PORT_EXPOSE}${HEALTHZ_PATH}"
+                    wrap([$class: 'BuildUser']) {
+                        env.BUILD_USER_ID = env.BUILD_USER_ID
+                        env.BUILD_USER_EMAIL = "$BUILD_USER_ID@$DOMAIN"
+                    }
+                    echo "build user id: ${BUILD_USER_ID}"
+                    echo "build user email: ${BUILD_USER_EMAIL}"
+                }
+            }
+        }
+        
+        stage('检出代码') {
+            steps {
+                script {
+                    BRANCHS = sh (
+                        script: "echo \$(git ls-remote -h ${PROJECT_GITLAB_URL} | awk -F '/' '{print \$NF}' | grep -v master) | sed 's/ /\\n/g'",
+                        returnStdout: true
+                        ).trim()
+                        
+                    if ("${BRANCHS}" == "") {
+                        input message: '不存在除master以外的分支，请确认是否发布master分支？', ok: '发布'
+                        env.BRANCH_NAME = "master"
+                    } else {
+                        env.BRANCH_NAME = input message: '请选择要发布的分支', ok: '确定', parameters: [choice(name: 'BRANCH_NAME', choices: "${BRANCHS}", description: '要发布的分支名称', trim: true)]
+                    }
+
+                    echo "已选择的分支: ${BRANCH_NAME}"
+                    git branch: "${BRANCH_NAME}", url: "${PROJECT_GITLAB_URL}"
+                    sh "git clone ${DEVOPS_PROJECT} && find ./devops/scripts -name '*.sh' -exec chmod +x {} \\;"
+                    
+                    env.BRANCH_SHORT_COMMIT_ID = sh (
+                        script: "./devops/scripts/verify/get_branch_short_commit_id.sh ${BRANCH_NAME}",
+                        returnStdout: true
+                        ).trim()
+
+                    env.MASTER_SHORT_COMMIT_ID = sh (
+                        script: "./devops/scripts/verify/get_branch_short_commit_id.sh develop",
+                        returnStdout: true
+                        ).trim()
+                        
+                    sh 'echo -e "已选择的分支: ${BRANCH_NAME}\\n${BRANCH_NAME}分支最新提交ID: ${BRANCH_SHORT_COMMIT_ID}\\ndevelop分支最新提交ID: ${MASTER_SHORT_COMMIT_ID}"'
+                }
+            }
+        }
+
+        stage('检查分支') {
+            steps {
+                script {
+                    if (env.ENV_NAME == "uat") {
+                    //    sh "./devops/scripts/verify/verify_uat_commit_id.sh"
+                        env.TAG_NAME = "${BRANCH_NAME}-${BRANCH_SHORT_COMMIT_ID}"
+                        echo "已生成Docker镜像标签名称: $TAG_NAME"
+                    } else {
+                        echo "要发布的环境为DEV, 跳过此步骤"
+                        env.TAG_NAME = "${BRANCH_NAME}-${BRANCH_SHORT_COMMIT_ID}-${BUILD_USER_ID}"
+                        echo "已生成Docker镜像标签名称: $TAG_NAME"
+                    }
+                    sh "mkdir -p ${WORKSPACE}/${TAG_NAME}"
+                }
+            }
+        }
+
+        stage('构建镜像') {
+            steps {
+                script {
+                    sh 'echo "标签名称: $TAG_NAME"'
+                    env.PROJECT_IMAGE = "${HARBOR_HOST}/${GROUP_NAME}-${ENV_TYPE}/${ENV_NAME}/${PROJECT}:${TAG_NAME}"
+                    sh "./devops/scripts/build/build_image.sh"
+                }
+            }
+        }
+
+        stage('服务测试'){
+            steps{
+                sh "./devops/scripts/test/test_service.sh"
+            }
+        }
+        
+        stage('推送镜像') {
+            steps {
+                script {
+                    withDockerRegistry (url: "https://${HARBOR_HOST}", credentialsId: "${HARBOR_CREDENTIALSID}") {
+                        sh "docker push ${PROJECT_IMAGE}"
+                        sh "docker rmi ${PROJECT_IMAGE}"
+                    }
+                }
+            }
+        }
+
+        stage('部署') {
+            steps {
+                script {
+                    sh '''
+                       echo '[env]' > ${WORKSPACE}/${TAG_NAME}/env.conf \
+                       && env >> ${WORKSPACE}/${TAG_NAME}/env.conf
+                       '''
+                    sh 'python ./devops/scripts/deploy/kubernetes/deploy.py'
+                    sh './devops/scripts/deploy/kubernetes/check_deploy.sh'
+                }
+            }
+        }
+        
+    }
+
+    post {
+        always {
+            step([$class: 'WsCleanup'])
+        }
+    }
+    
+}
+

@@ -1,0 +1,5 @@
+FROM ${PROD_IMAGE}
+
+WORKDIR /usr/share/nginx/html
+
+COPY ${PKG_PATH} .${INGRESS_PATH}

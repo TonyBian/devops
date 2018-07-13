@@ -1,0 +1,229 @@
+// pipeline 2.0
+pipeline {
+    agent {
+        label 'jnlp-k8s-prod-label'
+    }
+    options {
+        timestamps()
+        timeout(time:1, unit: 'HOURS')
+        disableConcurrentBuilds()
+        buildDiscarder logRotator(artifactDaysToKeepStr: '', artifactNumToKeepStr: '', daysToKeepStr: '', numToKeepStr: '10')
+    }
+
+    environment {
+        //环境标识, 用于harbor仓库名称, 取值范围{test|prod}
+        ENV_TYPE="prod"
+        ENV_NAME="pro"
+        
+        //项目信息
+        GROUP="IS"
+        GITLAB_GROUP_NAME="${GROUP}-group"
+        PROJECT_NAME="cas"
+        PROJECT_PATH="cas4-server-deploy"
+        PROJECT="${PROJECT_NAME}"
+        PROJECT_TYPE="ROOT"
+        SVC_NAME="${PROJECT}-service"
+        INGRESS_PATH="/"
+
+        //数据库信息
+        JDBCURL="jdbc:mysql://int-myclstr1.lc.com:3306/sso_tickets?characterEncoding=utf8"
+        JDBCUSER="sso_dbowner"
+        JDBCPWD="jlP-JisMiy6lLtmBIf"
+
+        //编译命令执行目录, 项目根目录下的子目录名称
+        SRC_PATH="/"
+        
+        //PKG名称
+        PKG_PATH="${PROJECT_PATH}"
+        
+        //deploy配置
+        REPLICAS="1"
+        HEALTHZ_PATH="/app.html"
+        EXEC_COMMAND='["sh", "-c", "[[ $(curl -X GET 127.0.0.1:8080/app.html -w %{http_code} -o /dev/null -s) -eq 200 ]]"]'
+        INITIAL_DELAY="300"
+        HEALTHZ_TIMEOUT="2"
+        CPU_LIMIT="200m"
+        MEM_LIMIT="2048Mi"
+        ARGS='["sh", "./ROOT/docker-entrypoint.sh"]'
+
+        //服务启动参数
+        JAVA_OPTS="-server -Xms1536m -Xmx1536m -XX:MaxNewSize=256m -Djava.awt.headless=true"
+
+        //gitlab地址
+        //GITLAB_HOST="git@10.1.10.172:"
+        GITLAB_HOST="ssh://git@gitlab.corp.lc.com:10022/"
+        
+        //项目地址
+        PROJECT_GITLAB_URL="${GITLAB_HOST}${GITLAB_GROUP_NAME}/${PROJECT_PATH}.git"
+
+        //对外暴露域名
+        //HOST_NAME="test.traefik.frontend.io"
+        HOST_NAME="lc.com"
+
+        //harbor仓库地址及认证
+        HARBOR_HOST="harbor.corp.lc.com"
+        HARBOR_CREDENTIALSID="harbor-admin-login"
+        
+        //所需docker镜像
+        PKG_BUILD_IMAGE="${HARBOR_HOST}/library/maven:v3.5.3"
+        PROD_IMAGE="${HARBOR_HOST}/base/tomcat:v8.5.31"
+        CURL_IMAGE="${HARBOR_HOST}/library/curl:latest"
+        KUBECTL_IMAGE="${HARBOR_HOST}/library/kubectl:v1.10.2"
+        
+        //docker build是否不使用缓存, 取值范围{true|false}
+        DOCKER_BUILE_NO_CACHE="false"
+        
+        //k8s apiserver地址及认证
+        KUBE_APISERVER="https://10.1.100.201:8443"
+        CA_DIR="/etc/kubernetes/ssl"
+        CLIENT_CERT="${CA_DIR}/admin.pem"
+        CLIENT_KEY="${CA_DIR}/admin-key.pem"
+        CA_CERT="${CA_DIR}/ca.pem"
+        //API_USER="readonly"
+        //API_PWD="readonly"
+        
+        //CI/CD项目名称
+        DEVOPS_PROJECT="${GITLAB_HOST}DevSecOps-group/devops.git"
+        DEVOPS_BRANCH="develop"
+        DEVOPS_ARCHIVE_PROJECT="${GITLAB_HOST}DevSecOps-group/devops-archive.git"
+
+        //Docker容器端口
+        PORT_EXPOSE="8080"
+        DEBUG_EXPOSE="8000"
+        
+        //其他参数
+        DOMAIN="lancare.com"
+    }
+ 
+    stages {
+        stage('预处理') {
+            steps {
+                script {
+                    env.GROUP_NAME = sh (
+                        script: "echo $GROUP | tr '[A-Z]' '[a-z]'",
+                        returnStdout: true
+                    ).trim()
+                    wrap([$class: 'BuildUser']) {
+                        env.BUILD_USER_ID = env.BUILD_USER_ID
+                        env.BUILD_USER_EMAIL = "$BUILD_USER_ID@$DOMAIN"
+                    }
+                    echo "build user id: ${BUILD_USER_ID}"
+                    echo "build user email: ${BUILD_USER_EMAIL}"
+                }
+            }
+        }
+        
+        stage('检出代码') {
+            steps {
+                script {
+                    BRANCHS = sh (
+                        script: "echo \$(git ls-remote -h ${PROJECT_GITLAB_URL} | awk -F '/' '{print \$NF}' | grep -v master) | sed 's/ /\\n/g'",
+                        returnStdout: true
+                        ).trim()
+                        
+                    if ("${BRANCHS}" == "") {
+                        env.BRANCH_NAME = "master"
+                    } else {
+                        env.BRANCH_NAME = input message: '请选择要发布的分支', ok: '确定', parameters: [choice(name: 'BRANCH_NAME', choices: "${BRANCHS}", description: '要发布的分支名称', trim: true)]
+                    }
+
+                    echo "已选择的分支: ${BRANCH_NAME}"
+                    git branch: "${BRANCH_NAME}", url: "${PROJECT_GITLAB_URL}"
+                    sh "mkdir ${PROJECT_PATH} && find -maxdepth 1 -not -name ${PROJECT_PATH} -not -name . -not -name .git -exec mv {} ${PROJECT_PATH}/ \\;"
+                    sh 'cp -f "${PROJECT_PATH}"/WEB-INF/deployerConfigContext-prod.xml "${PROJECT_PATH}"/WEB-INF/deployerConfigContext.xml'
+                    sh 'sed -i "s#^jdbc.jdbcUrl=.*#jdbc.jdbcUrl=${JDBCURL}#g" ./${PROJECT_PATH}/WEB-INF/jdbc.properties'
+                    sh 'sed -i "s#^jdbc.user=.*#jdbc.user=${JDBCUSER}#g" ./${PROJECT_PATH}/WEB-INF/jdbc.properties'
+                    sh 'sed -i "s#^jdbc.password=.*#jdbc.password=${JDBCPWD}#g" ./${PROJECT_PATH}/WEB-INF/jdbc.properties'
+
+                    sh "git clone -b ${DEVOPS_BRANCH} ${DEVOPS_PROJECT} && find ./devops/scripts -name '*.sh' -exec chmod +x {} \\;"
+
+                    env.BRANCH_SHORT_COMMIT_ID = sh (
+                        script: "./devops/scripts/verify/get_branch_short_commit_id.sh ${BRANCH_NAME}",
+                        returnStdout: true
+                        ).trim()
+
+                    env.MASTER_SHORT_COMMIT_ID = sh (
+                        script: "./devops/scripts/verify/get_branch_short_commit_id.sh master",
+                        returnStdout: true
+                        ).trim()
+                        
+                    sh 'echo -e "已选择的分支: ${BRANCH_NAME}\\n${BRANCH_NAME}分支最新提交ID: ${BRANCH_SHORT_COMMIT_ID}\\ndevelop分支最新提交ID: ${MASTER_SHORT_COMMIT_ID}"'
+                }
+            }
+        }
+
+        stage('检查分支') {
+            steps {
+                script {
+                    env.TAG_NAME = "${BRANCH_NAME}-${BRANCH_SHORT_COMMIT_ID}"
+                    echo "已生成Docker镜像标签名称: $TAG_NAME"
+                    sh "mkdir -p ${WORKSPACE}/${TAG_NAME}"
+                }
+            }
+        }
+
+        stage('构建镜像') {
+            steps {
+                script {
+                    sh 'echo "标签名称: $TAG_NAME"'
+                    env.PROJECT_IMAGE = "${HARBOR_HOST}/${GROUP_NAME}-${ENV_TYPE}/${ENV_NAME}/${PROJECT}:${TAG_NAME}"
+                    sh "./devops/scripts/build/build_image.sh"
+                }
+            }
+        }
+
+        stage('服务测试'){
+            steps{
+                sh "./devops/scripts/test/test_service.sh"
+            }
+        }
+        
+        stage('推送镜像') {
+            steps {
+                script {
+                    withDockerRegistry (url: "https://${HARBOR_HOST}", credentialsId: "${HARBOR_CREDENTIALSID}") {
+                        sh "docker push ${PROJECT_IMAGE}"
+                        sh "docker rmi ${PROJECT_IMAGE}"
+                    }
+                }
+            }
+        }
+
+        stage('部署') {
+            steps {
+                script {
+                    sh '''
+                       echo '[env]' > ${WORKSPACE}/${TAG_NAME}/env.conf \
+                       && env >> ${WORKSPACE}/${TAG_NAME}/env.conf
+                       '''
+                    sh 'python ./devops/scripts/deploy/kubernetes/deploy.py'
+                    sh './devops/scripts/deploy/kubernetes/check_deploy.sh'
+                }
+            }
+        }
+
+        stage('归档') {
+            steps {
+                script {
+                    sh '''
+                       git clone ${DEVOPS_ARCHIVE_PROJECT} devops-archive \
+                       && mkdir -p devops-archive/${GITLAB_GROUP_NAME}/${SVC_NAME} \
+                       && mv ${TAG_NAME} devops-archive/${GITLAB_GROUP_NAME}/${SVC_NAME}/${TAG_NAME}-$(date "+%Y%m%d-%H%M%S")/ \
+                       && cd devops-archive \
+                       && git config --global user.email "jnlp@lancare.com" \
+                       && git config --global user.name "jnlp" \
+                       && git add . && git commit -m "${TAG_NAME}" && git push
+                       '''
+                }
+            }
+        }
+        
+    }
+
+    post {
+        always {
+            step([$class: 'WsCleanup'])
+        }
+    }
+    
+}

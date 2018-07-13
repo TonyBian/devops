@@ -1,0 +1,1 @@
+* * * * * step=2; for (( i=0; i<60; i=(i+step) )); do python /usr/local/orange/sync.py > /usr/local/orange/logs/sync.log 2>&1; sleep $step; done; exit 0; 

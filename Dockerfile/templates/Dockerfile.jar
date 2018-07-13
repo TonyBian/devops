@@ -1,0 +1,7 @@
+FROM ${PROD_IMAGE}
+
+WORKDIR /root
+
+COPY ${PKG_PATH} ./
+
+CMD ["java", "-jar", "${PKG_NAME}"]

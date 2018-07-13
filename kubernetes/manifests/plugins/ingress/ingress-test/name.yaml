@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: name-service
+  namespace: default
+spec:
+  ports:
+    - port: 80
+      targetPort: 8080
+  selector:
+    app: name
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: name
+  namespace: default
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: name
+  template:
+    metadata:
+      labels:
+          app: name
+    spec:
+      containers:
+      - name: name
+        image: harbor.test.lc.com/lapp/name:rc1
+        ports:
+        - containerPort: 8080

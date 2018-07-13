@@ -1,0 +1,100 @@
+apiVersion: policy/v1beta1
+kind: PodDisruptionBudget
+metadata:
+  name: rabbitmq-pdb
+  namespace: rabbitmq
+spec:
+  selector:
+    matchLabels:
+      app: rabbitmq
+  maxUnavailable: 1
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rabbitmq
+  namespace: rabbitmq
+spec:
+  selector:                                                                                                                                                       
+    matchLabels:                                                                                                           
+      app: rabbitmq
+  serviceName: rabbitmq
+  replicas: 3
+  template:
+    metadata:
+      labels:
+        app: rabbitmq
+    spec:
+      serviceAccountName: rabbitmq
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: "app"
+                    operator: In
+                    values:
+                    - rabbitmq
+              topologyKey: "kubernetes.io/hostname"
+      containers:
+      - name: rabbitmq
+        image: harbor.corp.lc.com/base/rabbitmq:3.6.11-management-alpine
+        imagePullPolicy: Always
+        resources:
+          requests:
+            memory: "1024Mi"
+            cpu: "250m"
+          limits:
+            memory: "1024Mi"
+            cpu: "250m"
+        ports:
+        - containerPort: 5672
+          name: amqp
+        env:
+        - name: RABBITMQ_DEFAULT_USER
+          value: ${ADMIN_USER}
+        - name: RABBITMQ_DEFAULT_PASS
+          valueFrom:
+            secretKeyRef:
+              name: rabbitmq-secret
+              key: rabbitDefaultPass
+        - name: RABBITMQ_ERLANG_COOKIE
+          valueFrom:
+            secretKeyRef:
+              name: rabbitmq-secret
+              key: rabbitmqErlangCookie
+        - name: MY_POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: K8S_SERVICE_NAME
+          value: "rabbitmq"
+        - name: RABBITMQ_USE_LONGNAME
+          value: "true"
+        - name: RABBITMQ_NODENAME
+          value: "rabbit@$(MY_POD_NAME).$(K8S_SERVICE_NAME)"
+        - name: RABBITMQ_NODE_TYPE
+          value: disc
+        - name: AUTOCLUSTER_TYPE
+          value: "k8s"
+        - name: AUTOCLUSTER_DELAY
+          value: "10"
+        - name: AUTOCLUSTER_CLEANUP
+          value: "true"
+        - name: CLEANUP_WARN_ONLY
+          value: "false"
+        - name: K8S_ADDRESS_TYPE
+          value: "hostname"
+        - name: K8S_HOSTNAME_SUFFIX
+          value: ".$(K8S_SERVICE_NAME)"
+#        volumeMounts:
+#        - name: rabbitmq-volume
+#          mountPath: /var/lib/rabbitmq
+#  volumeClaimTemplates:
+#  - metadata:
+#      name: rabbitmq-volume
+#    spec:
+#      accessModes: [ "ReadWriteOnce" ]
+#      resources:
+#        requests:
+#          storage: 5Gi

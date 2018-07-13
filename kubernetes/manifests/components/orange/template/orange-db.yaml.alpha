@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: orange
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: orange-db
+  namespace: orange
+spec:
+  ports:
+    - protocol: TCP
+      port: 3306
+      targetPort: ${ORANGE_PORT}
+---
+kind: Endpoints
+apiVersion: v1
+metadata:
+  name: orange-db
+  namespace: orange
+subsets:
+  - addresses:
+      - ip: ${ORANGE_HOST}
+    ports:
+      - port: ${ORANGE_PORT}

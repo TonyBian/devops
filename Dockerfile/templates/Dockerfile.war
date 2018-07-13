@@ -1,0 +1,5 @@
+FROM ${PROD_IMAGE}
+
+WORKDIR /usr/local/tomcat/webapps
+
+COPY ${PKG_PATH} ./

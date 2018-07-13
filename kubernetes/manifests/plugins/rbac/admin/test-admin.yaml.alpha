@@ -1,0 +1,53 @@
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  namespace: dev
+  name: admin
+rules:
+- apiGroups:
+  - "" # "" indicates the core API group
+  resources:
+  - '*'
+  verbs:
+  - '*'
+---
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: admin-binding
+  namespace: dev
+subjects:
+- kind: User
+  name: readonly # Name is case sensitive
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role #this must be Role or ClusterRole
+  name: admin # this must match the name of the Role or ClusterRole you wish to bind to
+  apiGroup: rbac.authorization.k8s.io
+---
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  namespace: fat
+  name: admin
+rules:
+- apiGroups:
+  - "" # "" indicates the core API group
+  resources:
+  - '*'
+  verbs:
+  - '*'
+---
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: admin-binding
+  namespace: fat
+subjects:
+- kind: User
+  name: readonly # Name is case sensitive
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role #this must be Role or ClusterRole
+  name: admin # this must match the name of the Role or ClusterRole you wish to bind to
+  apiGroup: rbac.authorization.k8s.io

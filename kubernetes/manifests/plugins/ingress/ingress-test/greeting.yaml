@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: greeting-service
+  namespace: default
+spec:
+  ports:
+    - port: 80
+      targetPort: 8080
+  selector:
+    app: greeting
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: greeting
+  namespace: default
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: greeting
+  template:
+    metadata:
+      labels:
+        app: greeting
+    spec:
+      containers:
+      - name: greeting
+        image: harbor.test.lc.com/lapp/greeting:rc1
+        ports:
+        - containerPort: 8080

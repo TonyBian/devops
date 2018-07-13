@@ -1,0 +1,29 @@
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: greeting
+  namespace: default
+spec:
+  rules:
+  - host: test.traefik.frontend.io
+    http:
+      paths:
+      - path: /greeting
+        backend:
+          serviceName: greeting-service
+          servicePort: 80
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: name
+  namespace: default
+spec:
+  rules:
+  - host: test.traefik.frontend.io
+    http:
+      paths:
+      - path: /name
+        backend:
+          serviceName: name-service
+          servicePort: 80

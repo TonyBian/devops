@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: limit-range
+  namespace: {{ ns_name }}
+spec:
+  limits:
+  - default:
+      memory: 2048Mi
+    defaultRequest:
+      memory: 2048Mi
+    type: Container

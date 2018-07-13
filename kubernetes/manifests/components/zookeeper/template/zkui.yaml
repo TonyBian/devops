@@ -1,0 +1,64 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: zk
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: zkui-ingress
+  namespace: zk
+spec:
+  rules:
+  - host: ${ZKUI_URL}
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: zkui-svc
+          servicePort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zkui-svc
+  namespace: zk
+spec:
+  ports:
+    - name: http
+      port: 80
+      targetPort: 9090
+  selector:
+    app: zkui
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zkui
+  namespace: zk
+spec:
+  replicas: 1
+  revisionHistoryLimit: 0
+  selector:
+    matchLabels:
+      app: zkui
+  template:
+    metadata:
+      labels:
+        app: zkui
+    spec:
+      containers:
+      - name: zkui
+        image: tonybian/zkui:v2.0.1
+        ports:
+        - containerPort: 9090
+        args: ["/run.sh"]
+        volumeMounts:
+        - mountPath: /etc/localtime
+          name: time
+          readOnly: true
+      volumes:
+      - hostPath:
+          path: /etc/localtime
+          type: ""
+        name: time
